@@ -3,6 +3,9 @@ str_ancs_from_pars <- function(id, pars, chld) {
 	stopifnot(all(sapply(list(pars, chld), function(x) is.null(names(x)) | identical(names(x), id))))
 	int.pars <- c(split(as.integer(factor(unlist(use.names=FALSE, pars), levels=id)), unlist(use.names=FALSE, mapply(SIMPLIFY=FALSE, FUN=rep, id, sapply(pars, length)))), setNames(nm=setdiff(id, unlist(use.names=FALSE, pars)), rep(list(integer(0)), length(setdiff(id, unlist(use.names=FALSE, pars))))))[id]
 	int.chld <- c(split(as.integer(factor(unlist(use.names=FALSE, chld), levels=id)), unlist(use.names=FALSE, mapply(SIMPLIFY=FALSE, FUN=rep, id, sapply(chld, length)))), setNames(nm=setdiff(id, unlist(use.names=FALSE, chld)), rep(list(integer(0)), length(setdiff(id, unlist(use.names=FALSE, chld))))))[id]
+	
+	names(int.pars) = id
+	names(int.chld) = id
 
 	setNames(nm=id, lapply(ancs_from_pars(
 		int.pars,
@@ -11,6 +14,7 @@ str_ancs_from_pars <- function(id, pars, chld) {
 }
 
 ancs_from_pars <- function(pars, chld) {
+    browser()
 	ancs <- as.list(seq(length(pars)))
 	done <- sapply(pars, function(x) length(x) == 0)
 	cands <- which(done)
@@ -63,7 +67,16 @@ ontology_index <- function(parents, id=names(parents), name=id, obsolete=setName
 		)),
 		setNames(nm=setdiff(id, unlist(use.names=FALSE, parents)), rep(list(character(0)), length(setdiff(id, unlist(use.names=FALSE, parents)))))
 	)[id]
-	structure(lapply(FUN=setNames, nm=id, X=list(id=id, name=name, parents=parents, children=children, ancestors=str_ancs_from_pars(id, unname(parents), unname(children)), obsolete=obsolete, ...)), class="ontology_index", version=version)
+	structure(
+	    lapply(FUN=setNames,
+	           nm=id, 
+	           X=list(id=id,
+	                  name=name, 
+	                  parents=parents,
+	                  children=children,
+	                  ancestors=str_ancs_from_pars(id, unname(parents), unname(children)),
+	                  obsolete=obsolete, ...)
+	           ), class="ontology_index", version=version)
 }
 
 term_regexp <- "^\\[(Term|Typedef|Instance)\\]"
@@ -152,6 +165,66 @@ get_ontology <- function(
 				obsolete=if ("is_obsolete" %in% names(properties)) (!is.na(properties[["is_obsolete"]])) & properties[["is_obsolete"]] == "true" else rep(FALSE, length(properties[["id"]]))),
 			properties[-which(names(properties) %in% c("id","name","is_obsolete"))]))
 }
+
+
+get_ontology_old <- function(
+    file, 
+    propagate_relationships="is_a",
+    extract_tags="minimal"
+) {
+    if (!extract_tags %in% c("minimal", "everything"))
+        stop("'extract_tags' argument should be equal to either 'minimal' or 'everything'")
+    
+    minimal <- extract_tags == "minimal"
+    
+    raw_lines <- readLines(file)
+    #remove comments and trailing modifiers
+    m <- regexpr(text=raw_lines, pattern="^([^!{]+[^!{ \t])")
+    lines <- regmatches(x=raw_lines, m=m)
+    
+    term_lines <- grep(pattern=term_regexp, x=lines)
+    if (length(term_lines) == 0) stop("No terms detected in ontology source")
+    
+    tagged_lines <- grep(pattern=tag_regexp, x=lines)
+    
+    tag_matches <- regmatches(x=lines[tagged_lines], regexec(text=lines[tagged_lines], pattern=tag_regexp))
+    tags <- sapply(tag_matches, "[", 3)
+    values <- sapply(tag_matches, "[", 4)
+    
+    all_present_tag_types <- unique(tags)
+    use_tags <- if (minimal) intersect(c("id", "name", "is_obsolete"), all_present_tag_types) else all_present_tag_types
+    
+    propagate_lines <- which(tags %in% propagate_relationships)
+    
+    parents <- unname(lapply(FUN=unique, split(values[propagate_lines], cut(tagged_lines[propagate_lines], breaks=c(term_lines, Inf), labels=seq(length(term_lines))))))
+    
+    tag_lines <- which(tags %in% use_tags)
+    
+    properties <- mapply(
+        SIMPLIFY=FALSE,
+        FUN=function(vals, lns) {
+            unname(split(vals, cut(lns, breaks=c(term_lines, Inf), labels=seq(length(term_lines)))))
+        },
+        split(values[tag_lines], tags[tag_lines]),
+        split(tagged_lines[tag_lines], tags[tag_lines])
+    )
+    
+    simplify <- intersect(names(properties), c("id", "name", "def", "comment", "is_obsolete", "created_by", "creation_date"))
+    properties[simplify] <- lapply(properties[simplify], function(lst) sapply(lst, "[", 1))
+    names(properties) <- gsub(x=names(properties), pattern="^((parents)|(children)|(ancestors))$", replacement="\\1_OBO")
+    
+    do.call(
+        what=ontology_index, 
+        c(
+            list(
+                version=substr(lines[seq(term_lines[1]-1)], 1, 1000),
+                parents=parents,
+                id=properties[["id"]],
+                name=properties[["name"]],
+                obsolete=if ("is_obsolete" %in% names(properties)) (!is.na(properties[["is_obsolete"]])) & properties[["is_obsolete"]] == "true" else rep(FALSE, length(properties[["id"]]))),
+            properties[-which(names(properties) %in% c("id","name","is_obsolete"))]))
+}
+
 
 #' @export
 #' @rdname get_ontology
