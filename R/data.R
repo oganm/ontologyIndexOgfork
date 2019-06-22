@@ -135,6 +135,11 @@ get_ontology <- function(
 	simplify <- intersect(names(properties), c("id", "name", "def", "comment", "is_obsolete", "created_by", "creation_date"))
 	properties[simplify] <- lapply(properties[simplify], function(lst) sapply(lst, "[", 1))
 	names(properties) <- gsub(x=names(properties), pattern="^((parents)|(children)|(ancestors))$", replacement="\\1_OBO")
+	
+	
+	for(i in seq_along(parents)){
+	    parents[[i]] = parents[[i]][parents[[i]]!=properties[['id']][i]]
+	}
 
 	do.call(
 		what=ontology_index, 
