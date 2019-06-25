@@ -14,20 +14,95 @@ str_ancs_from_pars <- function(id, pars, chld) {
 }
 
 ancs_from_pars <- function(pars, chld) {
-    browser()
+    # create empty list for all ancestors
 	ancs <- as.list(seq(length(pars)))
+	# mark the ones that have no more ancestors for sure.
+	# this is the first pass so these are the top level ones without any other parents
 	done <- sapply(pars, function(x) length(x) == 0)
+	# get parent candidates. later find children to be parents of these things
 	cands <- which(done)
+	# vector to fill out
 	new.done <- 1:length(cands)
+	# iterate until all is done
+	browser()
 	while (!all(done)) {
-		cands <- unique(unlist(use.names=FALSE, chld[cands[new.done]]))
-		v <- sapply(pars[cands], function(x) all(done[x]))
+	    # get parent possible parent candidates to look for. Use newly done as the candidates since
+	    # all others are already processed.
+		new.cands <- unique(unlist(use.names=FALSE, chld[cands[new.done]]))
+		v <- sapply(pars[new.cands], function(x) all(done[x]))
+		
+		if(class(v)!='logical'){
+		    message('loops detected in ontology. this might take a while')
+		    stop()
+		    # at this point everything is a parent candidate again
+		    new.cands = which(!done)
+		    loopy_parent = function(index,parents,children,memoised = FALSE){
+		        i = index
+		        loopyParents  = index
+		        while(TRUE){
+		            i = unique(parents[[i]])
+		            # print(i)
+		            # if i has more than 1 parents, explore each parent to find... parents
+		            if(length(i)>1){
+		                i = unlist(lapply(i,function(i,parents){
+		                    if(memoised){
+		                        tryCatch(memo_loopy_parent(i,parents),
+		                                 error = function(e){
+		                                     paste(i,'STACK LIMIT')
+		                                 })
+		                    } else{
+		                        tryCatch(loopy_parent(i,parents),
+		                                 error = function(e){
+		                                     paste(i,'STACK LIMIT')
+		                                 })
+		                    }
+
+		                }, parents = parents))
+		                loopyParents =c(loopyParents,unique(i))
+		                return(rev(loopyParents))
+		            }
+		            if(index %in% i || length(i) == 0){
+		                break
+		            }
+		            loopyParents = c(loopyParents,i)
+		        }
+		        return(rev(unique(loopyParents)))
+		    }
+		    memo_loopy_parent = memoise::memoise(loopy_parent)
+		    # candidates try to reach themselves through their parents, if they 
+		    # do the loop is over
+		    
+		    new.cands[[2]] %>% loopy_parent(parents) %>% {names(parents[.])}
+		    lapply(new.cands,memo_loopy_parent,parents = pars)
+		    for(i in new.cands){
+		        print(i)
+		        memo_loopy_parent(i,parents)
+		    }
+		    
+		    new.cands %>% lapply(loopy_parent, parents = pars)
+		    
+		    ancs[loopNotDone]
+		    while(length(loopNotDone)>0){
+		        ancs[[loopNotDone[i]]]
+		    }
+		    
+		}
+		
 		if (!is.logical(v)) {
 			stop("Can't get ancestors for items ", paste0(collapse=", ", which(!done)))
 		}
+		cands = new.cands
+		
 		new.done <- which(v)
 		done[cands[new.done]] <- TRUE
-		ancs[cands[new.done]] <- mapply(SIMPLIFY=FALSE, FUN=c, lapply(cands[new.done], function(x) unique(unlist(use.names=FALSE, ancs[pars[[x]]]))), cands[new.done])
+		ancs[cands[new.done]] <-
+		    mapply(SIMPLIFY=FALSE,
+		           FUN=c, 
+		           lapply(cands[new.done],
+		                  function(x){
+		                      unique(unlist(use.names=FALSE, ancs[pars[[x]]]))
+		                      }),
+		           cands[new.done])
 	}
 	ancs
 }
@@ -149,7 +224,7 @@ get_ontology <- function(
 	properties[simplify] <- lapply(properties[simplify], function(lst) sapply(lst, "[", 1))
 	names(properties) <- gsub(x=names(properties), pattern="^((parents)|(children)|(ancestors))$", replacement="\\1_OBO")
 	
-	
+	# remove self parents. this used to confuse the ancestor finder
 	for(i in seq_along(parents)){
 	    parents[[i]] = parents[[i]][parents[[i]]!=properties[['id']][i]]
 	}
@@ -195,7 +270,6 @@ get_ontology_old <- function(
     use_tags <- if (minimal) intersect(c("id", "name", "is_obsolete"), all_present_tag_types) else all_present_tag_types
     
     propagate_lines <- which(tags %in% propagate_relationships)
-    
     parents <- unname(lapply(FUN=unique, split(values[propagate_lines], cut(tagged_lines[propagate_lines], breaks=c(term_lines, Inf), labels=seq(length(term_lines))))))
     
     tag_lines <- which(tags %in% use_tags)
