@@ -14,97 +14,93 @@ str_ancs_from_pars <- function(id, pars, chld) {
 }
 
 ancs_from_pars <- function(pars, chld) {
+    loopy_parent_memory = new.env()
+    loopy_parent_memory$memory = rep(list('no memory'), length(pars))
+    loopy_parent = function(index, parents){
+        if(!'no memory' %in% loopy_parent_memory$memory[[index]]){
+            return(loopy_parent_memory$memory[[index]])
+        }
+        index = unname(index)
+        i = index
+        loopyParents  = index
+        while(TRUE){
+            i = unique(parents[[i]])
+            # if there are more than 1 parents, get into a recursive rabbit hole
+            if(length(i)>1){
+                out = c(unique(unlist(lapply(i,function(t){
+                    tryCatch(loopy_parent(t,parents),
+                             error = function(e){
+                                 if(grepl('C stack',e)){
+                                     return(paste('C_STACK',t))
+                                 }
+                             })
+                }))),rev(loopyParents))
+                break
+            } else if(length(i) == 0 || any(duplicated(c(loopyParents,i)))){
+                # if you loop back to yourself or run out of parents or find a loop upstream stop
+                out = rev(loopyParents)
+                break
+            }
+            loopyParents = c(loopyParents,i)
+        }
+        if(!is.character(out)){
+            # detect if there is an error, if there is do not memorize
+            loopy_parent_memory$memory[[index]] = out
+        }
+        return(out)
+    }
+    
+    
     # create empty list for all ancestors
-	ancs <- as.list(seq(length(pars)))
-	# mark the ones that have no more ancestors for sure.
-	# this is the first pass so these are the top level ones without any other parents
-	done <- sapply(pars, function(x) length(x) == 0)
-	# get parent candidates. later find children to be parents of these things
-	cands <- which(done)
-	# vector to fill out
-	new.done <- 1:length(cands)
-	# iterate until all is done
-	browser()
-	while (!all(done)) {
-	    # get parent possible parent candidates to look for. Use newly done as the candidates since
-	    # all others are already processed.
-		new.cands <- unique(unlist(use.names=FALSE, chld[cands[new.done]]))
-		v <- sapply(pars[new.cands], function(x) all(done[x]))
-		
-		if(class(v)!='logical'){
-		    message('loops detected in ontology. this might take a while')
-		    stop()
-		    # at this point everything is a parent candidate again
-		    new.cands = which(!done)
-		    loopy_parent = function(index,parents,children,memoised = FALSE){
-		        i = index
-		        loopyParents  = index
-		        while(TRUE){
-		            i = unique(parents[[i]])
-		            # print(i)
-		            # if i has more than 1 parents, explore each parent to find... parents
-		            if(length(i)>1){
-		                i = unlist(lapply(i,function(i,parents){
-		                    if(memoised){
-		                        tryCatch(memo_loopy_parent(i,parents),
-		                                 error = function(e){
-		                                     paste(i,'STACK LIMIT')
-		                                 })
-		                    } else{
-		                        tryCatch(loopy_parent(i,parents),
-		                                 error = function(e){
-		                                     paste(i,'STACK LIMIT')
-		                                 })
-		                    }
-
-		                }, parents = parents))
-		                loopyParents =c(loopyParents,unique(i))
-		                return(rev(loopyParents))
-		            }
-		            if(index %in% i || length(i) == 0){
-		                break
-		            }
-		            loopyParents = c(loopyParents,i)
-		        }
-		        return(rev(unique(loopyParents)))
-		    }
-		    memo_loopy_parent = memoise::memoise(loopy_parent)
-		    # candidates try to reach themselves through their parents, if they 
-		    # do the loop is over
-		    
-		    new.cands[[2]] %>% loopy_parent(parents) %>% {names(parents[.])}
-		    lapply(new.cands,memo_loopy_parent,parents = pars)
-		    for(i in new.cands){
-		        print(i)
-		        memo_loopy_parent(i,parents)
-		    }
-		    
-		    new.cands %>% lapply(loopy_parent, parents = pars)
-		    
-		    ancs[loopNotDone]
-		    while(length(loopNotDone)>0){
-		        ancs[[loopNotDone[i]]]
-		    }
-		    
-		}
-		
-		if (!is.logical(v)) {
-			stop("Can't get ancestors for items ", paste0(collapse=", ", which(!done)))
-		}
-		cands = new.cands
-		
-		new.done <- which(v)
-		done[cands[new.done]] <- TRUE
-		ancs[cands[new.done]] <-
-		    mapply(SIMPLIFY=FALSE,
-		           FUN=c, 
-		           lapply(cands[new.done],
-		                  function(x){
-		                      unique(unlist(use.names=FALSE, ancs[pars[[x]]]))
-		                      }),
-		           cands[new.done])
-	}
-	ancs
+    ancs <- as.list(seq(length(pars)))
+    # mark the ones that have no more ancestors for sure.
+    # this is the first pass so these are the top level ones without any other parents
+    done <- sapply(pars, function(x) length(x) == 0)
+    # get parent candidates. later find children to be parents of these things
+    cands <- which(done)
+    # vector to fill out
+    new.done <- 1:length(cands)
+    # iterate until all is done
+    loopy_parent_memory$memory[done] = ancs[done]
+    while (!all(done)) {
+        cands <- unique(unlist(use.names=FALSE, chld[cands[new.done]]))
+        v <- sapply(pars[cands], function(x) all(done[x]))
+        if (!is.logical(v)) {
+            break
+        }
+        new.done <- which(v)
+        done[cands[new.done]] <- TRUE
+        ancs[cands[new.done]] <- mapply(SIMPLIFY=FALSE, FUN=c, lapply(cands[new.done], function(x) unique(unlist(use.names=FALSE, ancs[pars[[x]]]))), cands[new.done])
+        loopy_parent_memory$memory[cands[new.done]] = ancs[cands[new.done]]
+    }
+    
+    if(length(which(!done))>0){
+        message('This ontology has a cyclic structure. Processing might take longer than usual')
+        
+        leftovers = which(!done)
+        leftovers %>% lapply(function(index){
+            loopy_parent(index,pars)
+        }) -> processLeftovers
+        
+        # any leftover that still has a "C_STACK parentname" in it could not be resolved
+        # due to s_stack errors
+        badOnes = sapply(processLeftovers,function(x){
+            class(x) == 'character'
+        })
+        if(any(badOnes)){
+            warning(paste0('Cyclic ontology could be fully resolved due to C stack usage limit. ',sum(badOnes),
+                           ' terms will have missing parents. Problematic terms are: ',
+                           paste(names(leftovers)[badOnes],collapse = ', ')))
+            processLeftovers[badOnes] = lapply(processLeftovers[badOnes],function(x){
+                erroredParents = x[grepl('C_STACK',x)]
+                as.integer(unique(c(x[!grepl('C_STACK',x)],gsub('C_STACK ','',erroredParents))))
+            })
+        }
+        
+        ancs[which(!done)] = processLeftovers
+    }
+    
+    return(ancs)
 }
 
 #' Create \code{ontology_index} object from vectors and lists of term properties
