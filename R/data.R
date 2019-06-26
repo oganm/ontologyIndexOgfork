@@ -43,10 +43,7 @@ ancs_from_pars <- function(pars, chld) {
             }
             loopyParents = c(loopyParents,i)
         }
-        if(!is.character(out)){
-            # detect if there is an error, if there is do not memorize
-            loopy_parent_memory$memory[[index]] = out
-        }
+        loopy_parent_memory$memory[[index]] = out
         return(out)
     }
     
