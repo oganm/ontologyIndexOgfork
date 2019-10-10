@@ -13,8 +13,23 @@ get_descendants <- function(ontology, roots, exclude_roots=FALSE) {
 	if (class(roots) != "character")
 		stop("'terms' must be a character vector of term IDs")
 	direct_descs <- unique(setdiff(unlist(use.names=FALSE, ontology[["children"]][roots]), roots))
-	result <- if (length(direct_descs) == 0) roots else c(roots, get_descendants(ontology, roots=direct_descs))
+	result <- if (length(direct_descs) == 0) roots else c(roots, get_descendants2(ontology, roots=direct_descs,parents_to_exclude = direct_descs))
 	unique(unname(if (exclude_roots) setdiff(result, roots) else result))
+}
+
+
+get_descendants2 <- function(ontology, roots, exclude_roots=FALSE, parents_to_exclude = NULL) {
+    if (class(roots) != "character")
+        stop("'terms' must be a character vector of term IDs")
+    direct_descs <- unique(setdiff(unlist(use.names=FALSE, ontology[["children"]][roots]), roots))
+    
+    direct_descs = direct_descs[!direct_descs %in% parents_to_exclude]
+    
+    parents_to_exclude = c(parents_to_exclude, direct_descs)
+
+    
+    result <- if (length(direct_descs) == 0) roots else c(roots, get_descendants2(ontology, roots=direct_descs,parents_to_exclude = parents_to_exclude))
+    unique(unname(if (exclude_roots) setdiff(result, roots) else result))
 }
 
 #' Intersect a set of terms with the descendants of a given set of roots
